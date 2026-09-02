@@ -14,8 +14,11 @@ Endpoints:
 
 import csv
 import io
+import os
 from datetime import datetime, timezone
 from typing import Optional
+
+import anthropic
 
 import pandas as pd
 from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
@@ -52,12 +55,15 @@ from reconciliation.schemas import (
     AuditLogResponse,
     MetricsSummaryResponse,
     BulkIngestionResponse,
+    ExceptionExplainResponse,
+    AISuggestion,
 )
 from reconciliation.engine import run_reconciliation, MatchResult
 from reconciliation.exceptions import (
     create_exception,
     transition_exception,
     get_audit_trail,
+    get_exception,
     list_exceptions,
     InvalidTransitionError,
     ExceptionNotFoundError,
@@ -453,6 +459,119 @@ def get_exception_audit_trail(
         return [AuditLogResponse.model_validate(log) for log in trail]
     except ExceptionNotFoundError:
         raise HTTPException(status_code=404, detail=f"Exception {exception_id} not found")
+
+
+@app.get(
+    "/exceptions/{exception_id}/explain",
+    response_model=ExceptionExplainResponse,
+    tags=["Exceptions"],
+    summary="AI-assisted exception explanation",
+)
+def explain_exception(
+    exception_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Get an AI-generated explanation for an exception.
+    
+    This endpoint calls the Anthropic API to generate a plain-English hypothesis 
+    and recommended action for the human reviewer. It is strictly read-only and 
+    advisory, completely independent of the classification engine.
+    """
+    try:
+        exc = get_exception(db, exception_id)
+    except ExceptionNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Exception {exception_id} not found")
+
+    # Fetch context
+    recon_result = db.query(ReconciliationResult).filter(ReconciliationResult.id == exc.reconciliation_result_id).first()
+    
+    ledger_txn = None
+    if recon_result.ledger_id:
+        ledger_txn = db.query(LedgerTransaction).filter(LedgerTransaction.id == recon_result.ledger_id).first()
+        
+    settlement_rec = None
+    if recon_result.settlement_id:
+        settlement_rec = db.query(SettlementRecord).filter(SettlementRecord.id == recon_result.settlement_id).first()
+        
+    audit_trail = get_audit_trail(db, exception_id)
+    
+    # Prepare prompt context
+    ledger_str = "None"
+    if ledger_txn:
+        ledger_str = f"Order ID: {ledger_txn.order_id}, Amount: {ledger_txn.amount} {ledger_txn.currency}, Status: {ledger_txn.status.value}"
+        
+    settlement_str = "None"
+    if settlement_rec:
+        settlement_str = f"Ref: {settlement_rec.external_transaction_ref}, Gross: {settlement_rec.gross_amount} {settlement_rec.currency}, Net: {settlement_rec.net_amount}, Status: {settlement_rec.status.value}"
+        
+    audit_str = str([f"{a.old_status.value} -> {a.new_status.value} ({a.note or 'no note'})" for a in audit_trail])
+
+    context = f"""
+    Exception ID: {exc.id}
+    Category: {exc.category.value}
+    Status: {exc.status.value}
+    Rule Fired: {recon_result.matched_rule}
+    Confidence Notes: {recon_result.confidence_notes}
+    
+    Ledger Transaction: {ledger_str}
+    Settlement Record: {settlement_str}
+    Audit Trail: {audit_str}
+    """
+    
+    prompt = f"""
+    You are a financial operations assistant. Please review the following payment reconciliation exception:
+    
+    {context}
+    
+    Provide exactly two things:
+    1. A one-sentence plain-English hypothesis for why this record didn't cleanly match, aimed at a finance/ops reviewer, not a developer.
+    2. A recommended next action (e.g., "likely safe to accept as fee rounding" or "recommend escalate — no rule explains this gap").
+    
+    Format your response exactly as:
+    Hypothesis: <your hypothesis>
+    Action: <your action>
+    """
+    
+    ai_suggestion = None
+    error_note = None
+    
+    try:
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY environment variable not set")
+            
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-3-haiku-20240307",
+            max_tokens=200,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text = response.content[0].text
+        
+        # Parse the expected format
+        hypothesis_part = text
+        action_part = "Review required."
+        
+        if "Action:" in text:
+            parts = text.split("Action:", 1)
+            hypothesis_part = parts[0].replace("Hypothesis:", "").strip()
+            action_part = parts[1].strip()
+        elif "Hypothesis:" in text:
+            hypothesis_part = text.replace("Hypothesis:", "").strip()
+            
+        ai_suggestion = AISuggestion(
+            hypothesis=hypothesis_part,
+            recommended_action=action_part
+        )
+    except Exception as e:
+        error_note = f"Failed to generate AI suggestion: {str(e)}"
+        
+    return ExceptionExplainResponse(
+        exception=ExceptionResponse.model_validate(exc),
+        ai_suggestion=ai_suggestion,
+        error=error_note
+    )
 
 
 # ---------------------------------------------------------------------------

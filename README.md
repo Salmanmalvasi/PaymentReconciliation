@@ -47,6 +47,8 @@ A production-grade backend system that automatically matches transactions betwee
 | **Explainable Exception** | Doesn't match exactly, but a known business rule fully accounts for the gap (fee, rounding, timing) | Logged for audit, low urgency |
 | **True Discrepancy** | No known rule explains the gap — real money could be wrong | Operational urgency, requires human review |
 
+> **Note on AI Explanations**: The system includes an AI-assisted exception explanation endpoint (`GET /exceptions/{id}/explain`) that uses Anthropic's Claude to provide human-readable hypotheses and recommended actions. This is strictly a read-only, advisory layer and does not participate in the core deterministic classification engine.
+
 ## Rule Tiers (Priority Order)
 
 ### Rule 1: Exact Match
@@ -179,6 +181,9 @@ curl -X PATCH http://localhost:8000/exceptions/1 \
 
 # Get audit trail
 curl http://localhost:8000/exceptions/1/audit-trail
+
+# Get AI-assisted explanation for an exception (requires ANTHROPIC_API_KEY)
+curl http://localhost:8000/exceptions/1/explain
 ```
 
 ### Metrics

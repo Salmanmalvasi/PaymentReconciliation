@@ -38,14 +38,14 @@
 
 ## Reconciliation Results
 
-### Overall Match Rate: **88.9%**
+### Overall Match Rate: **87.0%**
 
 | Classification | Count | Percentage |
 |---------------|-------|------------|
-| **Matched** | 9,555 | 88.9% |
-| **Explainable Exception** | 157 | 1.5% |
-| **True Discrepancy** | 1,035 | 9.6% |
-| **Total** | **10,747** | 100% |
+| **Matched** | 9,555 | 87.0% |
+| **Explainable Exception** | 389 | 3.5% |
+| **True Discrepancy** | 1,035 | 9.4% |
+| **Total** | **10,979** | 100% |
 
 ### Rule Attribution
 
@@ -53,7 +53,7 @@
 |------|-------|---------------|
 | `exact_match` | 9,385 | Matched |
 | `fee_explained_match` | 170 | Matched |
-| `partial_refund_match` | 157 | Explainable Exception |
+| `partial_refund_match` | 389 | Explainable Exception |
 | `true_discrepancy` | 1,035 | True Discrepancy |
 
 ### Exception Breakdown by Category
@@ -62,7 +62,7 @@
 |----------|-------|
 | Missing ledger (settlement-only orphan) | 461 |
 | Missing settlement (ledger-only orphan) | 445 |
-| Partial refund | 157 |
+| Partial refund | 389 |
 | Currency mismatch | 85 |
 | Fee difference | 170 |
 | Amount mismatch | 44 |
@@ -136,6 +136,9 @@ The **1,035 true discrepancies** break down into:
 - **85 currency mismatches** — same transaction reference appearing in different currencies
 - **44 amount mismatches** — significant amount differences beyond tolerance thresholds
 
-The **157 explainable exceptions** are all partial refund scenarios, correctly identified and grouped by the engine.
+The **389 explainable exceptions** are all partial refund scenarios, correctly identified and grouped by the engine.
+
+> [!NOTE]
+> **Invariant Fix Note**: The original match rate calculation and result row count were slightly skewed because the `partial_refund_match` rule would correctly find multiple source records (e.g. 1 ledger charge and 3 partial refunds) but emit only *one* result row for the entire group. This violated the 1:1 row invariant (one result per input row) and made the total results count inconsistent. The engine was updated so that partial refunds now generate one result per source row involved (pairing them 1:1, with extras receiving null counterparts). This ensures every generated ledger and settlement row perfectly maps to a result row. This correctly inflated the explainable exception count from 157 (the number of partial refund *groups*) to 389 (the number of individual source rows participating in those groups), thereby correcting the math.
 
 These numbers align closely with the injected anomaly counts (150 missing settlements injected → 445 flagged including duplicates and cascading effects; 166 missing ledgers injected → 461 flagged), confirming the engine's classification accuracy.

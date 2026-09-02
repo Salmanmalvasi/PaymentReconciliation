@@ -5,7 +5,7 @@ These schemas provide clean, typed contracts for the FastAPI endpoints
 and generate usable OpenAPI documentation.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -146,6 +146,22 @@ class AuditLogResponse(BaseModel):
     changed_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AISuggestion(BaseModel):
+    hypothesis: str = Field(..., description="Plain-English hypothesis for why this record didn't match cleanly")
+    recommended_action: str = Field(..., description="Recommended next action for the reviewer")
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    disclaimer: str = Field(
+        default="This is an AI-generated suggestion and is advisory only. It is not part of the rule-based classification.",
+        description="Disclaimer regarding the AI-generated nature of this suggestion"
+    )
+
+
+class ExceptionExplainResponse(BaseModel):
+    exception: ExceptionResponse
+    ai_suggestion: Optional[AISuggestion] = None
+    error: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

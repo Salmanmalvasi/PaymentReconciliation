@@ -179,9 +179,13 @@ class TestPartialRefundMatch:
         matched_l, matched_s = set(), set()
         results = rule_partial_refund_match(ledger, settlements, matched_l, matched_s)
 
-        assert len(results) == 1
-        assert results[0].classification == "explainable_exception"
-        assert results[0].matched_rule == "partial_refund_match"
+        assert len(results) == 2
+        assert all(r.classification == "explainable_exception" for r in results)
+        assert all(r.matched_rule == "partial_refund_match" for r in results)
+        assert results[0].ledger_idx == 0
+        assert results[0].settlement_idx == 0
+        assert results[1].ledger_idx is None
+        assert results[1].settlement_idx == 1
 
 
 # ---------------------------------------------------------------------------
@@ -352,8 +356,22 @@ class TestIntegration:
         # Should have all three classification types
         assert "matched" in output.summary["classifications"]
 
+        # Check invariant: every ledger and settlement row is covered exactly once
+        l_covered = {r.ledger_idx for r in output.results if r.ledger_idx is not None}
+        s_covered = {r.settlement_idx for r in output.results if r.settlement_idx is not None}
+        
+        assert len(l_covered) == len(ledger_df), f"Expected {len(ledger_df)} ledger rows covered, got {len(l_covered)}"
+        assert len(s_covered) == len(settlement_df), f"Expected {len(settlement_df)} settlement rows covered, got {len(s_covered)}"
+        
+        # Verify no duplicate indices (one result per row)
+        l_all = [r.ledger_idx for r in output.results if r.ledger_idx is not None]
+        s_all = [r.settlement_idx for r in output.results if r.settlement_idx is not None]
+        assert len(l_all) == len(l_covered), "Duplicate ledger_idx found in results"
+        assert len(s_all) == len(s_covered), "Duplicate settlement_idx found in results"
+
         # Total results should account for all records
         total_classified = sum(output.summary["classifications"].values())
+        assert total_classified == len(output.results)
         assert total_classified > 0
         print(f"\n  Integration test: {total_classified} records classified")
         print(f"  Injected anomalies: {sum(injected_counts.values())}")

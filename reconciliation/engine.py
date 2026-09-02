@@ -269,6 +269,9 @@ def rule_partial_refund_match(
     Detects: Orders with partial refunds producing multiple settlement entries.
     Groups by order_id/ref, sums all settlement amounts, and checks if the
     ledger's net position matches within tolerance.
+
+    Invariant: produces one result per source row involved in the group,
+    pairing ledger and settlement rows 1:1 (extras get a null counterpart).
     """
     results = []
     tolerance = settings.fee_tolerance
@@ -296,25 +299,33 @@ def rule_partial_refund_match(
         settlement_total = float(s_matches["gross_amount"].sum())
 
         if abs(ledger_total - settlement_total) <= tolerance:
-            for li in l_matches.index:
-                if li not in matched_ledger:
-                    matched_ledger.add(li)
-            for si in s_matches.index:
-                if si not in matched_settlement:
-                    matched_settlement.add(si)
+            l_indices = [i for i in l_matches.index if i not in matched_ledger]
+            s_indices = [i for i in s_matches.index if i not in matched_settlement]
 
-            results.append(MatchResult(
-                ledger_idx=l_matches.index[0],
-                settlement_idx=s_matches.index[0],
-                classification="explainable_exception",
-                matched_rule="partial_refund_match",
-                confidence_notes=(
-                    f"Partial refund: ledger_total={ledger_total:.4f}, "
-                    f"settlement_total={settlement_total:.4f}, "
-                    f"entries={len(s_matches)}"
-                ),
-                category="partial_refund",
-            ))
+            # Mark all as matched
+            for li in l_indices:
+                matched_ledger.add(li)
+            for si in s_indices:
+                matched_settlement.add(si)
+
+            # Produce one result per source row, pairing 1:1
+            n_pairs = max(len(l_indices), len(s_indices))
+            for i in range(n_pairs):
+                li = l_indices[i] if i < len(l_indices) else None
+                si = s_indices[i] if i < len(s_indices) else None
+                results.append(MatchResult(
+                    ledger_idx=li,
+                    settlement_idx=si,
+                    classification="explainable_exception",
+                    matched_rule="partial_refund_match",
+                    confidence_notes=(
+                        f"Partial refund group: ref={ref}, "
+                        f"ledger_total={ledger_total:.4f}, "
+                        f"settlement_total={settlement_total:.4f}, "
+                        f"group_size={n_pairs}"
+                    ),
+                    category="partial_refund",
+                ))
 
     return results
 
