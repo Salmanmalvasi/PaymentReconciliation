@@ -101,7 +101,7 @@ class LedgerTransaction(Base):
     customer_id = Column(String(64), nullable=False)
     amount = Column(Numeric(14, 4), nullable=False)
     currency = Column(String(3), nullable=False)
-    status = Column(Enum(LedgerStatus), nullable=False, default=LedgerStatus.completed)
+    status = Column(Enum(LedgerStatus, name="ledger_status", create_type=False), nullable=False, default=LedgerStatus.completed)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
@@ -131,7 +131,7 @@ class SettlementRecord(Base):
     net_amount = Column(Numeric(14, 4), nullable=False)
     currency = Column(String(3), nullable=False)
     settled_at = Column(DateTime(timezone=True), nullable=False)
-    status = Column(Enum(SettlementStatus), nullable=False, default=SettlementStatus.settled)
+    status = Column(Enum(SettlementStatus, name="settlement_status", create_type=False), nullable=False, default=SettlementStatus.settled)
     source_batch_id = Column(String(64), nullable=True)
 
     # back-references
@@ -179,7 +179,7 @@ class ReconciliationResult(Base):
     run_id = Column(BigInteger, ForeignKey("reconciliation_runs.id"), nullable=False, index=True)
     ledger_id = Column(BigInteger, ForeignKey("ledger_transactions.id"), nullable=True, index=True)
     settlement_id = Column(BigInteger, ForeignKey("settlement_records.id"), nullable=True, index=True)
-    classification = Column(Enum(Classification), nullable=False)
+    classification = Column(Enum(Classification, name="classification", create_type=False), nullable=False)
     matched_rule = Column(String(128), nullable=False)
     confidence_notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -204,8 +204,8 @@ class Exception(Base):
     reconciliation_result_id = Column(
         BigInteger, ForeignKey("reconciliation_results.id"), nullable=False, unique=True
     )
-    status = Column(Enum(ExceptionStatus), nullable=False, default=ExceptionStatus.open)
-    category = Column(Enum(ExceptionCategory), nullable=False, default=ExceptionCategory.unknown)
+    status = Column(Enum(ExceptionStatus, name="exception_status", create_type=False), nullable=False, default=ExceptionStatus.open)
+    category = Column(Enum(ExceptionCategory, name="exception_category", create_type=False), nullable=False, default=ExceptionCategory.unknown)
     opened_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     reviewer_notes = Column(Text, nullable=True)
     resolved_by = Column(String(128), nullable=True)
@@ -232,8 +232,8 @@ class ExceptionAuditLog(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     exception_id = Column(BigInteger, ForeignKey("exceptions.id"), nullable=False, index=True)
     changed_by = Column(String(128), nullable=False)
-    old_status = Column(Enum(ExceptionStatus), nullable=False)
-    new_status = Column(Enum(ExceptionStatus), nullable=False)
+    old_status = Column(Enum(ExceptionStatus, name="exception_status", create_type=False), nullable=False)
+    new_status = Column(Enum(ExceptionStatus, name="exception_status", create_type=False), nullable=False)
     note = Column(Text, nullable=True)
     changed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

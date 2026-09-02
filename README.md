@@ -83,7 +83,79 @@ Everything left unexplained: currency mismatches, large amount differences, orph
 
 ## Quick Start
 
-### 1. Clone & Install
+### Option A: Docker (Recommended — zero setup)
+
+```bash
+git clone https://github.com/Salmanmalvasi/PaymentReconciliation.git
+cd PaymentReconciliation
+cp .env.example .env          # edit if you want to set ANTHROPIC_API_KEY
+docker compose up --build -d
+```
+
+This brings up Postgres + the API server. Migrations run automatically on startup.
+
+API docs: http://localhost:8000/docs
+
+**Load sample data and run reconciliation inside the container:**
+
+```bash
+# Generate 10k synthetic transactions
+docker compose exec app python -m reconciliation.generator \
+  --num-records 10000 --anomaly-rate 0.15 --seed 42
+
+# Ingest into the database and reconcile
+docker compose exec app python -c "
+from reconciliation.generator import generate
+from reconciliation.database import SessionLocal, engine
+from reconciliation.models import Base, LedgerTransaction, SettlementRecord, LedgerStatus, SettlementStatus
+from datetime import datetime, timezone
+import pandas as pd
+
+Base.metadata.create_all(bind=engine)
+_, ledger_df, settlement_df, _ = generate(num_records=1000, anomaly_rate=0.15, seed=42, output_dir='/tmp/data')
+db = SessionLocal()
+for _, row in ledger_df.iterrows():
+    db.add(LedgerTransaction(
+        order_id=row['order_id'], customer_id=row['customer_id'],
+        amount=float(row['amount']), currency=row['currency'],
+        status=LedgerStatus(row['status']),
+        created_at=row['created_at'], updated_at=row['updated_at'],
+    ))
+for _, row in settlement_df.iterrows():
+    db.add(SettlementRecord(
+        external_transaction_ref=row['external_transaction_ref'],
+        gross_amount=float(row['gross_amount']), fee_amount=float(row['fee_amount']),
+        net_amount=float(row['net_amount']), currency=row['currency'],
+        settled_at=row['settled_at'], status=SettlementStatus(row['status']),
+        source_batch_id=row.get('source_batch_id'),
+    ))
+db.commit()
+db.close()
+print('Data loaded successfully!')
+"
+
+# Trigger reconciliation
+curl -X POST http://localhost:8000/reconcile/run
+
+# Check results
+curl http://localhost:8000/metrics/summary
+```
+
+**Stop / teardown:**
+
+```bash
+docker compose down        # stop containers, keep data
+docker compose down -v     # stop containers AND delete database volume
+```
+
+> To access Postgres directly for debugging: `docker compose --profile debug up -d`
+> (exposes Postgres on host port 5433)
+
+---
+
+### Option B: Manual Setup (without Docker)
+
+#### 1. Clone & Install
 
 ```bash
 git clone https://github.com/Salmanmalvasi/PaymentReconciliation.git
